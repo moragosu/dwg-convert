@@ -27,10 +27,21 @@ fi
 
 # ── 4. LibreDWG (dwg2dxf) ─────────────────────────────────────────────────
 echo "=== DWG 변환 도구 확인 ==="
-if [ -f "$DWG2DXF_DEST" ]; then
-    echo "  dwg2dxf: OK ($($DWG2DXF_DEST --version 2>&1 | head -1))"
+if command -v dwg2dxf &>/dev/null || [ -f "$DWG2DXF_DEST" ]; then
+    echo "  dwg2dxf: OK"
 else
-    echo "  dwg2dxf 미설치 → LibreDWG ${LIBREDWG_VERSION} 빌드 시작..."
+    echo "  dwg2dxf 미설치 → 설치 시도 중..."
+
+    # 방법 1: apt (가장 빠름, Ubuntu universe 저장소)
+    if command -v apt-get &>/dev/null; then
+        echo "  [방법 1] apt-get install libredwg-utils 시도..."
+        if sudo apt-get install -y libredwg-utils 2>/dev/null && command -v dwg2dxf &>/dev/null; then
+            echo "  dwg2dxf apt 설치 완료"
+            exit 0  # 이후 빌드 불필요
+        fi
+    fi
+
+    echo "  apt 설치 실패 → 소스 빌드로 전환..."
 
     # 빌드 의존성 확인
     for pkg in gcc make autoconf; do
