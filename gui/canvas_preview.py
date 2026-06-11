@@ -10,7 +10,7 @@ from shapely.geometry import Polygon
 
 from core.layout_analyzer import ZONE_COLORS
 
-MAX_BG_ENTITIES = 8000
+MAX_BG_SEGMENTS = 15_000   # 렌더링할 최대 세그먼트 수
 
 
 class PreviewCanvas(tk.Canvas):
@@ -23,19 +23,23 @@ class PreviewCanvas(tk.Canvas):
         self._offset_x = 0.0
         self._offset_y = 0.0
 
+        # 사전 샘플링된 배경 세그먼트 캐시 [(x0,y0,x1,y1), ...]
+        self._bg_segments: list[tuple[float, float, float, float]] = []
+        self._cached_bounds: Optional[tuple[float, float, float, float]] = None
+
         # 선택 모드 상태
         self._selection_mode = False
         self._sel_callback: Optional[Callable] = None
         self._drag_start: Optional[tuple[int, int]] = None
         self._sel_rect_id: Optional[int] = None
 
-        self.bind("<MouseWheel>",     self._on_zoom)
-        self.bind("<Button-4>",       self._on_zoom)
-        self.bind("<Button-5>",       self._on_zoom)
-        self.bind("<ButtonPress-1>",  self._on_press)
-        self.bind("<B1-Motion>",      self._on_drag)
-        self.bind("<ButtonRelease-1>",self._on_release)
-        self.bind("<Configure>",      self._on_resize)
+        self.bind("<MouseWheel>",      self._on_zoom)
+        self.bind("<Button-4>",        self._on_zoom)
+        self.bind("<Button-5>",        self._on_zoom)
+        self.bind("<ButtonPress-1>",   self._on_press)
+        self.bind("<B1-Motion>",       self._on_drag)
+        self.bind("<ButtonRelease-1>", self._on_release)
+        self.bind("<Configure>",       self._on_resize)
 
     # ── 공개 API ────────────────────────────────────────────────────────
 
@@ -45,9 +49,17 @@ class PreviewCanvas(tk.Canvas):
         zones: Optional[list[tuple[str, Polygon]]] = None,
         doc=None,
     ) -> None:
+        doc_changed = doc is not self._doc
         self._polygon = polygon
         self._zones = zones or []
-        self._doc = doc
+
+        if doc_changed:
+            self._doc = doc
+            self._cached_bounds = None
+            self._bg_segments = []
+            if doc is not None:
+                self._sample_background(doc)
+
         self._fit()
         self._redraw()
 
@@ -55,6 +67,8 @@ class PreviewCanvas(tk.Canvas):
         self._polygon = None
         self._zones = []
         self._doc = None
+        self._bg_segments = []
+        self._cached_bounds = None
         self.delete("all")
         cx = self.winfo_width() // 2 or 400
         cy = self.winfo_height() // 2 or 200
@@ -63,7 +77,6 @@ class PreviewCanvas(tk.Canvas):
                          fill="#AAAAAA", font=("Arial", 11))
 
     def enable_selection_mode(self, callback: Callable[[float, float, float, float], None]) -> None:
-        """영역 선택 모드 활성화. 드래그 완료 시 callback(x0,y0,x1,y1) 호출 (DXF 좌표)."""
         self._selection_mode = True
         self._sel_callback = callback
         self.configure(cursor="crosshair")
@@ -76,6 +89,53 @@ class PreviewCanvas(tk.Canvas):
             self.delete(self._sel_rect_id)
             self._sel_rect_id = None
 
+    # ── 배경 사전 샘플링 ────────────────────────────────────────────────
+
+    def _sample_background(self, doc) -> None:
+        """
+        doc 로드 시 한 번만 실행. 전체 엔티티에서 균등 샘플링하여
+        _bg_segments와 _cached_bounds를 채운다.
+        """
+        msp = doc.modelspace()
+
+        # 1패스: 전체 엔티티 수 추정 및 bounds 수집
+        all_segs: list[tuple[float, float, float, float]] = []
+        xs: list[float] = []
+        ys: list[float] = []
+
+        for e in msp:
+            try:
+                if e.dxftype() == "LINE":
+                    sx, sy = e.dxf.start.x, e.dxf.start.y
+                    ex, ey = e.dxf.end.x, e.dxf.end.y
+                    all_segs.append((sx, sy, ex, ey))
+                    xs += [sx, ex]
+                    ys += [sy, ey]
+                elif e.dxftype() == "LWPOLYLINE":
+                    pts = [(p[0], p[1]) for p in e.get_points()]
+                    for i in range(len(pts) - 1):
+                        all_segs.append((pts[i][0], pts[i][1],
+                                         pts[i+1][0], pts[i+1][1]))
+                    xs += [p[0] for p in pts]
+                    ys += [p[1] for p in pts]
+            except Exception:
+                pass
+
+        if not all_segs:
+            return
+
+        # bounds 캐시
+        self._cached_bounds = (min(xs), min(ys), max(xs), max(ys))
+
+        # 균등 서브샘플링
+        n = len(all_segs)
+        if n <= MAX_BG_SEGMENTS:
+            self._bg_segments = all_segs
+        else:
+            import numpy as np
+            idx = np.round(np.linspace(0, n - 1, MAX_BG_SEGMENTS)).astype(int)
+            self._bg_segments = [all_segs[i] for i in idx]
+
     # ── 이벤트 ─────────────────────────────────────────────────────────
 
     def _on_press(self, event: tk.Event) -> None:
@@ -85,7 +145,6 @@ class PreviewCanvas(tk.Canvas):
         if self._drag_start is None:
             return
         if self._selection_mode:
-            # 고무줄 직사각형
             if self._sel_rect_id:
                 self.delete(self._sel_rect_id)
             x0, y0 = self._drag_start
@@ -93,7 +152,6 @@ class PreviewCanvas(tk.Canvas):
                 x0, y0, event.x, event.y,
                 outline="#FF4444", width=2, dash=(6, 3), tags="selrect")
         else:
-            # 패닝
             dx = event.x - self._drag_start[0]
             dy = event.y - self._drag_start[1]
             self._offset_x += dx
@@ -108,7 +166,6 @@ class PreviewCanvas(tk.Canvas):
             cx0, cy0 = self._drag_start
             cx1, cy1 = event.x, event.y
             if abs(cx1 - cx0) > 5 and abs(cy1 - cy0) > 5:
-                # 캔버스 픽셀 → DXF 좌표
                 dx0, dy0 = self._c2d(cx0, cy0)
                 dx1, dy1 = self._c2d(cx1, cy1)
                 x0, x1 = min(dx0, dx1), max(dx0, dx1)
@@ -119,7 +176,8 @@ class PreviewCanvas(tk.Canvas):
     def _on_zoom(self, event: tk.Event) -> None:
         if self._selection_mode:
             return
-        factor = 1.15 if (getattr(event, "num", 0) == 4 or getattr(event, "delta", 0) > 0) else (1 / 1.15)
+        factor = 1.15 if (getattr(event, "num", 0) == 4
+                          or getattr(event, "delta", 0) > 0) else (1 / 1.15)
         mx, my = event.x, event.y
         self._offset_x = mx + (self._offset_x - mx) * factor
         self._offset_y = my + (self._offset_y - my) * factor
@@ -127,7 +185,8 @@ class PreviewCanvas(tk.Canvas):
         self._redraw()
 
     def _on_resize(self, event: tk.Event) -> None:
-        if self._zones or self._polygon is not None:
+        # doc, zones, polygon 중 하나라도 있으면 리핏 + 리드로
+        if self._doc is not None or self._zones or self._polygon is not None:
             self._fit()
             self._redraw()
         else:
@@ -155,34 +214,16 @@ class PreviewCanvas(tk.Canvas):
         if self._polygon:
             polys.append(self._polygon)
         polys.extend(p for _, p in self._zones)
-        if not polys and self._doc:
-            return self._doc_bounds()
-        if not polys:
-            return None
-        xs = [b for p in polys for b in (p.bounds[0], p.bounds[2])]
-        ys = [b for p in polys for b in (p.bounds[1], p.bounds[3])]
-        return min(xs), min(ys), max(xs), max(ys)
-
-    def _doc_bounds(self):
-        """폴리곤 없을 때 도큐먼트 엔티티에서 bounds 추정."""
-        msp = self._doc.modelspace()
-        xs, ys = [], []
-        for e in msp:
-            try:
-                if e.dxftype() == "LINE":
-                    xs += [e.dxf.start.x, e.dxf.end.x]
-                    ys += [e.dxf.start.y, e.dxf.end.y]
-                    if len(xs) > 2000:
-                        break
-            except Exception:
-                pass
-        if not xs:
-            return None
-        return min(xs), min(ys), max(xs), max(ys)
+        if polys:
+            xs = [b for p in polys for b in (p.bounds[0], p.bounds[2])]
+            ys = [b for p in polys for b in (p.bounds[1], p.bounds[3])]
+            return min(xs), min(ys), max(xs), max(ys)
+        # 폴리곤 없으면 캐시된 doc bounds 사용
+        return self._cached_bounds
 
     def _redraw(self) -> None:
         self.delete("all")
-        if self._doc is not None:
+        if self._bg_segments:
             self._draw_background()
         if self._zones:
             for i, (name, poly) in enumerate(self._zones):
@@ -190,30 +231,15 @@ class PreviewCanvas(tk.Canvas):
                 self._draw_zone(poly, color, name)
         elif self._polygon is not None:
             self._draw_outline(self._polygon, "#0066FF")
-        # 선택 사각형 복원
         if self._sel_rect_id:
             self.tag_raise("selrect")
 
     def _draw_background(self) -> None:
-        msp = self._doc.modelspace()
-        count = 0
-        for entity in msp:
-            if count >= MAX_BG_ENTITIES:
-                break
-            try:
-                if entity.dxftype() == "LINE":
-                    x1, y1 = self._d2c(entity.dxf.start.x, entity.dxf.start.y)
-                    x2, y2 = self._d2c(entity.dxf.end.x, entity.dxf.end.y)
-                    self.create_line(x1, y1, x2, y2, fill="#BBBBBB", width=1, tags="bg")
-                    count += 1
-                elif entity.dxftype() == "LWPOLYLINE":
-                    pts = list(entity.get_points())
-                    if len(pts) >= 2:
-                        flat = [c for p in pts for c in self._d2c(p[0], p[1])]
-                        self.create_line(flat, fill="#BBBBBB", width=1, tags="bg")
-                        count += 1
-            except Exception:
-                pass
+        for x0, y0, x1, y1 in self._bg_segments:
+            cx0, cy0 = self._d2c(x0, y0)
+            cx1, cy1 = self._d2c(x1, y1)
+            self.create_line(cx0, cy0, cx1, cy1,
+                             fill="#BBBBBB", width=1, tags="bg")
 
     def _draw_outline(self, poly: Polygon, color: str) -> None:
         coords = list(poly.exterior.coords)
@@ -230,7 +256,6 @@ class PreviewCanvas(tk.Canvas):
         self.create_polygon(pts, outline=color, fill=color,
                              stipple="gray25", width=2, tags="zone")
         self.create_polygon(pts, outline=color, fill="", width=2, tags="zone")
-        # 중심 레이블
         cx_w = sum(x for x, y in coords) / len(coords)
         cy_w = sum(y for x, y in coords) / len(coords)
         lx, ly = self._d2c(cx_w, cy_w)
@@ -240,11 +265,9 @@ class PreviewCanvas(tk.Canvas):
     # ── 좌표 변환 ───────────────────────────────────────────────────────
 
     def _d2c(self, x: float, y: float) -> tuple[float, float]:
-        """DXF → 캔버스 픽셀."""
         return (x * self._scale + self._offset_x,
                 -y * self._scale + self._offset_y)
 
     def _c2d(self, cx: float, cy: float) -> tuple[float, float]:
-        """캔버스 픽셀 → DXF 좌표."""
         return ((cx - self._offset_x) / self._scale,
                 -(cy - self._offset_y) / self._scale)

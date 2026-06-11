@@ -159,9 +159,17 @@ class MainApp(tk.Tk):
     def _load_file(self, path: str) -> None:
         try:
             from core.dwg_reader import read_dwg_or_dxf
-            self._set_ui(30, "파일 읽는 중... (대용량은 수분 소요)")
+            self._set_ui(20, "파일 읽는 중... (대용량은 수분 소요)")
             doc = read_dwg_or_dxf(path)
             self._doc = doc
+
+            self._set_ui(70, "도면 미리보기 준비 중...")
+            # 배경 샘플링을 여기서 미리 수행 (UI 스레드 블로킹 방지)
+            self._canvas._doc = doc
+            self._canvas._cached_bounds = None
+            self._canvas._bg_segments = []
+            self._canvas._sample_background(doc)
+
             self.after(0, lambda: self._canvas.draw(doc=doc))
             self._set_ui(100, "로드 완료.  '영역 선택 모드'로 라인 영역을 드래그하세요.")
             self.after(0, lambda: self._canvas_status.set(
