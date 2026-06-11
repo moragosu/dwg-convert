@@ -6,6 +6,7 @@ import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Optional
 
 from core.layout_analyzer import ZONE_COLORS
 from gui.canvas_preview import PreviewCanvas
@@ -360,7 +361,3 @@ class MainApp(tk.Tk):
     def _set_ui(self, progress: int, message: str) -> None:
         self.after(0, lambda: self._progress.configure(value=progress))
         self.after(0, lambda: self._status_var.set(message))
-
-
-# Optional 타입 힌트 (런타임 불필요)
-from typing import Optional
