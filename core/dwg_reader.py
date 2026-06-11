@@ -77,22 +77,41 @@ def _read_dxf(file_path: str, preprocess: bool = False) -> Drawing:
 
 
 def _read_dwg(file_path: str) -> Drawing:
+    dwg_path = Path(file_path)
+
+    # ── 캐시된 DXF 확인 (같은 폴더에 이미 변환된 파일이 있으면 바로 사용) ──
+    for cached in [
+        dwg_path.with_suffix(".dxf"),
+        dwg_path.with_name(dwg_path.stem + "_fixed.dxf"),
+    ]:
+        if cached.exists():
+            return _read_dxf(str(cached))
+
+    # ── 변환 시도: 결과를 DWG 옆에 영구 저장 ──────────────────────────────
+    out_dxf = dwg_path.with_suffix(".dxf")
+
     with tempfile.TemporaryDirectory() as tmpdir:
         dxf_path = _try_oda_convert(file_path, tmpdir)
-        if dxf_path:
-            return _read_dxf(dxf_path)
+        if not dxf_path:
+            dxf_path = _try_libdwg_convert(file_path, tmpdir)
 
-        dxf_path = _try_libdwg_convert(file_path, tmpdir)
         if dxf_path:
-            return _read_dxf(dxf_path)
+            # 전처리(SORTENTSTABLE 제거) 후 영구 경로로 복사
+            fixed = _preprocess_dxf(dxf_path)
+            dest = str(out_dxf)
+            if fixed != dest:
+                import shutil
+                shutil.copy2(fixed, dest)
+            return _read_dxf(dest)
 
     raise RuntimeError(
         "DWG 파일을 직접 변환할 수 없습니다.\n\n"
         "해결 방법:\n"
-        "1. CAD 프로그램(AutoCAD, LibreCAD 등)에서 DXF로 내보내기 후 선택\n"
-        "2. ODA File Converter 설치:\n"
-        "   https://www.opendesign.com/guestfiles/oda_file_converter\n"
-        "3. sudo apt-get install libredwg-utils"
+        "1. CAD 프로그램(AutoCAD, LibreCAD 등)에서 DXF로 내보내기 후\n"
+        "   같은 폴더에 같은 이름으로 저장하면 자동으로 인식합니다.\n"
+        "   예) LAYOUT_Virtual.dxf\n\n"
+        "2. ODA File Converter (무료):\n"
+        "   https://www.opendesign.com/guestfiles/oda_file_converter"
     )
 
 
