@@ -33,7 +33,7 @@ class MainApp(tk.Tk):
     # ------------------------------------------------------------------ #
 
     def _build_ui(self) -> None:
-        pad = {"padx": 8, "pady": 4}
+        pad = {"padding": (8, 4)}
 
         # 1. 파일 선택
         file_frm = ttk.LabelFrame(self, text="1. 파일 선택 (DWG / DXF)", **pad)
