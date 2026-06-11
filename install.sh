@@ -44,9 +44,28 @@ else
     # 다운로드 & 빌드
     TMP_SRC="/tmp/libredwg-${LIBREDWG_VERSION}"
     if [ ! -d "$TMP_SRC" ]; then
-        curl -fsSL "https://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.gz" \
-            -o /tmp/libredwg.tar.gz
-        tar xzf /tmp/libredwg.tar.gz -C /tmp
+        TARBALL="/tmp/libredwg.tar.gz"
+        URLS=(
+            "https://github.com/LibreDWG/libredwg/releases/download/${LIBREDWG_VERSION}/libredwg-${LIBREDWG_VERSION}.tar.gz"
+            "http://ftpmirror.gnu.org/libredwg/libredwg-${LIBREDWG_VERSION}.tar.gz"
+            "https://mirror.fcix.net/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.gz"
+            "http://ftp.gnu.org/gnu/libredwg/libredwg-${LIBREDWG_VERSION}.tar.gz"
+        )
+        DOWNLOADED=0
+        for URL in "${URLS[@]}"; do
+            echo "  다운로드 시도: $URL"
+            if curl -fsSL --connect-timeout 15 "$URL" -o "$TARBALL" 2>/dev/null; then
+                DOWNLOADED=1
+                break
+            fi
+        done
+        if [ "$DOWNLOADED" -eq 0 ]; then
+            echo "  [오류] LibreDWG 다운로드 실패."
+            echo "  수동 설치: https://github.com/LibreDWG/libredwg/releases"
+            echo "  또는 DWG 대신 DXF 파일을 직접 사용하세요."
+            exit 1
+        fi
+        tar xzf "$TARBALL" -C /tmp
     fi
 
     # fake pkg-config (의존성 없이 빌드)
