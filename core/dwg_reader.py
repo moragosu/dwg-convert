@@ -12,9 +12,17 @@ from pathlib import Path
 import ezdxf
 from ezdxf.document import Drawing
 
-# LibreDWG 빌드 경로 (소스 빌드 시)
-_LIBREDWG_DWG2DXF = "/tmp/libredwg-0.13.4/programs/dwg2dxf"
-_LIBREDWG_LIBS    = "/tmp/libredwg-0.13.4/src/.libs"
+# LibreDWG 설치 경로 후보 (우선순위 순)
+import os as _os
+_LIBREDWG_CANDIDATES = [
+    _os.path.expanduser("~/.local/bin/dwg2dxf"),
+    "/usr/local/bin/dwg2dxf",
+    "/usr/bin/dwg2dxf",
+    # 레거시: /tmp 빌드 경로
+    "/tmp/libredwg-0.13.4/programs/dwg2dxf",
+    "/tmp/libredwg-0.13.3/programs/dwg2dxf",
+]
+_LIBREDWG_LIBS = _os.path.expanduser("~/.local/lib")
 
 
 def read_dwg_or_dxf(file_path: str) -> Drawing:
@@ -117,8 +125,8 @@ def _try_oda_convert(dwg_path: str, output_dir: str) -> str | None:
 
 
 def _try_libdwg_convert(dwg_path: str, output_dir: str) -> str | None:
-    # 소스 빌드 경로 우선, 없으면 PATH에서 검색
-    candidates = [_LIBREDWG_DWG2DXF] if Path(_LIBREDWG_DWG2DXF).exists() else []
+    # 후보 경로에서 존재하는 바이너리 수집 + PATH 검색
+    candidates = [c for c in _LIBREDWG_CANDIDATES if Path(c).exists()]
     if _command_exists("dwg2dxf"):
         candidates.append("dwg2dxf")
     if not candidates:
