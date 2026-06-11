@@ -1,0 +1,31 @@
+# uv / Python 환경
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+.python-version
+
+# 빌드 / 배포
+dist/
+build/
+*.egg-info/
+
+# CAD 파일 (대용량, 개인 도면)
+*.dwg
+*.DWG
+*.dxf
+*.DXF
+
+# 출력 파일
+*.stp
+*.step
+
+# Claude Code 설정
+.claude/
+
+# 에디터 / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
